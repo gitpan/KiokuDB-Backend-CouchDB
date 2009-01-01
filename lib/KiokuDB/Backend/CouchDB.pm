@@ -10,7 +10,7 @@ use JSON;
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = "0.01";
+our $VERSION = "0.02";
 
 with qw(
     KiokuDB::Backend
@@ -47,6 +47,7 @@ has db => (
 
 has '+id_field'    => ( default => "_id" );
 has '+class_field' => ( default => "class" );
+has '+class_meta_field' => ( default => "class_meta" );
 has '+deleted_field' => ( default => "_deleted" );
 
 #has _prefetch => (
@@ -129,7 +130,7 @@ sub insert {
 #    my $p = $self->_prefetch;
 #
 #    foreach my $uid ( @uids ) {
-#        $p->{$uid} = $db->open_doc($uid);
+#        $p->{$uid} ||= $db->open_doc($uid);
 #    }
 #}
 
@@ -211,7 +212,7 @@ latency in communicating with CouchDB over HTTP.
 
 An L<AnyEvent::CouchDB::Database> instance.
 
-Requires
+Required.
 
 =item create
 

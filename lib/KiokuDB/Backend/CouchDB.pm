@@ -10,7 +10,7 @@ use JSON;
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = "0.03";
+our $VERSION = "0.04";
 
 with qw(
     KiokuDB::Backend
@@ -20,6 +20,7 @@ with qw(
     KiokuDB::Backend::Role::Scan
     KiokuDB::Backend::Role::Query::Simple::Linear
     KiokuDB::Backend::Role::TXN::Memory
+    KiokuDB::Backend::Role::Concurrency::POSIX
 );
 
 has create => (

@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               KiokuDB-Backend-CouchDB
-version:            0.03
+version:            0.04
 abstract:           ~
 author:  []
 license:            unknown
@@ -10,7 +10,7 @@ configure_requires:
 requires:
     AnyEvent::CouchDB:   1.07
     Data::Stream::Bulk:  0
-    KiokuDB:             0.17
+    KiokuDB:             0.24
     Moose:               0
     Scope::Guard:        0
 no_index:

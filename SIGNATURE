@@ -1,5 +1,5 @@
 This file contains message digests of all files listed in MANIFEST,
-signed via the Module::Signature module, version 0.55.
+signed via the Module::Signature module, version 0.66.
 
 To verify the content in this distribution, first make sure you have
 Module::Signature installed, then type:
@@ -14,18 +14,21 @@ not run its Makefile.PL or Build.PL.
 -----BEGIN PGP SIGNED MESSAGE-----
 Hash: SHA1
 
-SHA1 b84fb06f1eca3167b999eac47ce2d279e5cfb47d Changes
-SHA1 97afc3677557a3b57e2b3ea9e4bdce4c3d85560e MANIFEST
+SHA1 645fc50b309e074397daf0a5aae399e8d0a461b1 .includepath
+SHA1 a2a80168152b082cdf1503eb1e5037b82392e0ff .project
+SHA1 aabf6194a296039f4f89156be309848fbcecc386 Changes
+SHA1 8f55a0683d897a9bea3d067be771e72241047ebb MANIFEST
 SHA1 190e9058eb9c6446a1a3f3ddf15b082f1ecde152 MANIFEST.SKIP
-SHA1 8645830f35848f9e1dea613c623fdb1f1d31d14d META.yml
-SHA1 edadfe003c54627bdad28434049ac8a4206413e0 Makefile.PL
-SHA1 e2f37cc414e10460e829aa91ebd251a21886fd58 lib/KiokuDB/Backend/CouchDB.pm
+SHA1 ff86b99b03b4db735765c48f33a3d6232f67aef1 META.yml
+SHA1 aba70e8ade4ab0a3772cc2d713049289abc7e824 Makefile.PL
+SHA1 8f9ca7add54c1e7bebbcd8e2e798839253a8956f lib/KiokuDB/Backend/CouchDB.pm
+SHA1 65e3a9428e10d6502111847066c7b5e9518f1d06 lib/KiokuX/CouchDB/Role/View.pm
 SHA1 67af79bb9443fb77cdd723658821e68243995064 t/01load.t
 SHA1 1c67e511245153a7582025cdc3417f88eb50a571 t/couchdb.t
 -----BEGIN PGP SIGNATURE-----
-Version: GnuPG v1.4.7 (Darwin)
+Version: GnuPG v1.4.9 (GNU/Linux)
 
-iD8DBQFJqXdpVCwRwOvSdBgRAhZaAKCzRRJxwyIsBRiDnb0gENmKESWEVwCeIQ/b
-Hm6/cLw5F/Vb2b0Mt/jAlG8=
-=/krb
+iEYEARECAAYFAkyNkp8ACgkQW5GyqjvTSXqFBACfR/qHYCcPPYBUhUO/9bPVfBDh
+6CUAn08KLY7ws9eRUoz5aFl61M9aTruB
+=uSCq
 -----END PGP SIGNATURE-----

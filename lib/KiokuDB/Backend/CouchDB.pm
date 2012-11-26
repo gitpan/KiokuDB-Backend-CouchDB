@@ -2,21 +2,20 @@
 
 package KiokuDB::Backend::CouchDB;
 use Moose;
-
 use Moose::Util::TypeConstraints;
-
 use Data::Stream::Bulk::Util qw(bulk);
 
 use AnyEvent::CouchDB;
-use JSON;
 use Carp 'confess';
 use Try::Tiny;
-use List::MoreUtils qw{ any all };
-use Data::Visitor::Callback;
+use List::MoreUtils qw{ any };
+use Time::HiRes qw/gettimeofday tv_interval/;
+
+use KiokuDB::Backend::CouchDB::Exceptions;
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = '0.10';
+our $VERSION = '0.16';
 
 # TODO Read revision numbers into rev field and use for later conflict resolution
 
@@ -31,6 +30,8 @@ with qw(
     KiokuDB::Backend::Role::Concurrency::POSIX
 );
 
+# TODO Remove TXN::Memory or ensure that it works as it should
+
 has create => (
     isa => "Bool",
     is  => "ro",
@@ -39,8 +40,8 @@ has create => (
 
 has conflicts => (
     is      => 'rw',
-    isa     => enum([qw{ overwrite confess ignore }]),
-    default => 'confess'
+    isa     => enum([qw{ overwrite confess ignore throw }]),
+    default => 'throw'
 );
     
 
@@ -74,11 +75,6 @@ has '+deleted_field' => ( default => "_deleted" );
 
 our @couch_meta_fields = qw{ _rev _attachments _conflicts };
 
-#has _prefetch => (
-#    isa => "HashRef",
-#    is  => "ro",
-#    default => sub { +{} },
-#);
 
 sub delete {
     my ( $self, @ids_or_entries ) = @_;
@@ -138,6 +134,8 @@ sub commit_entries {
     
     my @docs;
     my $db = $self->db;
+    
+    my $start = [ gettimeofday ];
 
     foreach my $entry ( @entries ) {
         
@@ -164,7 +162,8 @@ sub commit_entries {
         if($self->conflicts eq 'confess') {
             no warnings 'uninitialized';
             confess "Errors in update: " . join(", ", map { "$_->{error} (on ID $_->{id} ($_->{rev}, $_->{error}, $_->{reason}))" } @errors);
-        } elsif($self->conflicts eq 'overwrite') {
+        } elsif($self->conflicts eq 'overwrite' or $self->conflicts eq 'throw') {
+            my %conflicts;
             my @conflicts;
             my @other_errors;
             for(@errors) {
@@ -179,21 +178,40 @@ sub commit_entries {
             }
             
             # Updating resulted in conflicts that we handle by overwriting the change
-            my $old_docs = $db->open_docs([@conflicts])->recv;
+            my $old_docs = $db->open_docs([@conflicts], {conflicts => 'true'})->recv;
             if(exists $old_docs->{error}) {
                 confess "Updating ids ", join(', ', @conflicts), " failed during conflict resolution: $old_docs->{error}.";
             }
             my @old_docs = @{$old_docs->{rows}};
-            my @re_update_docs;
-            foreach my $old_doc (@old_docs) {
-                my($new_doc) = grep {$old_doc->{doc}{_id} eq $_->{_id}} @docs;
-                $new_doc->{_rev} = $old_doc->{doc}{_rev};
-                push @re_update_docs, $new_doc;
-            }
-            # Handle errors that has arised when trying the second update
-            if(@errors = grep { exists $_->{error} } @{$self->db->bulk_docs(\@re_update_docs)->recv}) {
-                confess "Updating ids ", join(', ', @conflicts), " failed during conflict resolution: ",
-                    join(', ', map { $_->{error} . ' on ' . $_->{id} } @errors);
+
+            if($self->conflicts eq 'overwrite') {
+                my @re_update_docs;
+                foreach my $old_doc (@old_docs) {
+                    my($new_doc) = grep {$old_doc->{doc}{_id} eq $_->{_id}} @docs;
+                    $new_doc->{_rev} = $old_doc->{doc}{_rev};
+                    push @re_update_docs, $new_doc;
+                }
+                # Handle errors that has arised when trying the second update
+                if(@errors = grep { exists $_->{error} } @{$self->db->bulk_docs(\@re_update_docs)->recv}) {
+                    confess "Updating ids ", join(', ', @conflicts), " failed during conflict resolution: ",
+                        join(', ', map { $_->{error} . ' on ' . $_->{id} } @errors);
+                }
+            } else { # throw
+                my $conflicts = [];
+                my %docs;
+                for(@docs) {
+                    $docs{$_->{_id}} = $_;
+                }
+                for(my $i=0; $i < @conflicts; $i++) {
+                    push @$conflicts, {
+                        new => $docs{$conflicts[$i]}->{data},
+                        old => $old_docs[$i]->{doc}{data}
+                    };
+                }
+                KiokuDB::Backend::CouchDB::Exception::Conflicts->throw(
+                    conflicts => $conflicts,
+                    error     => 'Conflict while storing objects'
+                );
             }
         }
         # $self->conflicts eq 'ignore' here, so don't do anything
@@ -202,19 +220,13 @@ sub commit_entries {
     foreach my $rev ( map { $_->{rev} } @$data ) {
         ( shift @docs )->{_rev} = $rev;
     }
-}
 
-# this is actually slower for some reason
-#sub prefetch {
-#    my ( $self, @uids ) = @_;
-#
-#    my $db = $self->db;
-#    my $p = $self->_prefetch;
-#
-#    foreach my $uid ( @uids ) {
-#        $p->{$uid} ||= $db->open_doc($uid);
-#    }
-#}
+    if ($ENV{KIOKU_COUCH_TRACE}){
+        my $end = [ gettimeofday ];
+        warn "[KIOKU COUCH TRACE] KiokuDB::Backend::CouchDB::commit_entries() [", tv_interval($start, $end),"s]:\n";
+        warn "[KIOKU COUCH TRACE]   ".$_->id.', ['.($_->class || '')."]\n" for @entries;
+    }
+}
 
 sub get_from_storage {
     my ( $self, @ids ) = @_;
@@ -226,6 +238,7 @@ sub get_from_storage {
     my $retry_delay = 5;
     my $data;
     my $error;
+    my $start = [ gettimeofday ];
     while(not $data and $error_count <= $max_errors) {
         $error = undef;
         try   { $data = $self->db->open_docs(\@ids)->recv }
@@ -277,6 +290,13 @@ sub get_from_storage {
     # TODO What to do with deleted entries?
     # TODO What to do with entries not found?
     
+    if ($ENV{KIOKU_COUCH_TRACE}){
+        my $end = [ gettimeofday ];
+        warn "[KIOKU COUCH TRACE] KiokuDB::Backend::CouchDB::get_from_storage() [", tv_interval($start, $end),"s]:\n";
+        warn "[KIOKU COUCH TRACE]   ".$_->{_id}.', ['.($_->{class} || '')."]\n" for @docs;
+        warn "[KIOKU COUCH TRACE]   (not found) ".$_->{key}."\n" for @not_found;
+    }
+    
     return map { $self->deserialize($_) } @docs;
 }
 
@@ -287,21 +307,6 @@ sub deserialize {
 
     return $self->expand_jspon(\%doc, backend_data => $doc );
 }
-
-## This method takes a raw perl data structure received from the backend and deflates
-## any object references found there.
-#sub deflate_struct {
-#    my $self = shift;
-#    my $visitor = Data::Visitor::Callback->new(
-#        hash => sub {
-#            if(ref eq 'HASH' and exists $_->{'$ref'} and $_->{'$ref'} =~ /^(.+).data$/) {
-#                $_ = $self->deserialize($_);
-#            }
-#            return $_;
-#        }
-#    );
-#    return map {$visitor->visit($_)} @_;
-#}
 
 sub clear {
     my $self = shift;
@@ -352,17 +357,14 @@ KiokuDB::Backend::CouchDB - CouchDB backend for L<KiokuDB>
 
 This backend provides L<KiokuDB> support for CouchDB using L<AnyEvent::CouchDB>.
 
-Note that this is the slowest backend of all for reading data, due to the
-latency in communicating with CouchDB over HTTP.
+=head1 DEBUGGING
+
+Set the environment variable KIOKU_COUCH_TRACE if you want debug output
+describing what CouchDB bound requests are being processed.
 
 =head1 TRANSACTION SUPPORT
 
-Since CouchDB supports atomicity by using optimistic concurrency locking
-transactions are be implemented by deferring all operations until the final
-commit.
-
-This means transactions are memory bound so if you are inserting or modifying
-lots of data it might be wise to break it down to smaller transactions.
+This backend does not currently support transactions.
 
 =head1 ATTRIBUTES
 
@@ -396,7 +398,8 @@ Yuval Kogman E<lt>nothingmuch@woobling.orgE<gt>
 
 =head1 CONTRIBUTORS
 
-Michael Zedeler E<lt>michael@zedeler.dk<gt>, Anders Bruun Borch E<lt>cyborch@deck.dk<gt>.
+Michael Zedeler E<lt>michael@zedeler.dk<gt>, Anders Bruun Borch E<lt>cyborch@deck.dk<gt>,
+Martin Parm E<lt>parmus@parmus.dk<gt>.
 
 =head1 COPYRIGHT
 
